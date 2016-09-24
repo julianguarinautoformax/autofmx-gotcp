@@ -1,4 +1,4 @@
-package gotcp
+package afmxsrv
 
 import (
 	"net"
