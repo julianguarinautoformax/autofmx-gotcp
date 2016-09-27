@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/autofmx/afmxdec"
 	"github.com/autofmx/afmxsrv"
 	"io"
 	"log"
@@ -23,25 +24,41 @@ import (
 // The code that follows is there as a learning facility (see Server)
 // it should be written in a specific file, part of the package
 //
-type EchoPacket struct {
+type AutofmxPacket struct {
 	buff []byte
 }
 
-func (epk *EchoPacket) Serialize() []byte {
+func (epk *AutofmxPacket) Serialize() []byte {
 	fmt.Println("Serialize")
 	return epk.buff
 }
-func (epk *EchoPacket) GetLength() uint32 {
+func (epk *AutofmxPacket) GetLength() uint32 {
 	return binary.BigEndian.Uint32(epk.buff[0:4])
 }
-func (epk *EchoPacket) GetBody() []byte {
+func (epk *AutofmxPacket) GetBody() []byte {
 	return epk.buff[4:]
 }
-func NewEchoPacket(buff []byte, hasLengthField bool) *EchoPacket {
-	p := &EchoPacket{}
+func (epk *AutofmxPacket) GetSizeDataBlock() (uint32, []byte, []byte) {
+
+	epkbuffsz := uint32(len(epk.buff))
+	sz := epk.GetLength()
+
+	if (sz + 4) == epkbuffsz {
+		return sz, epk.buff[4 : 4+sz], nil
+	}
+	return sz, epk.buff[4 : 4+sz], epk.buff[4+sz:]
+
+}
+func NewAutofmxPacket(buff []byte, hasLengthField bool) *AutofmxPacket {
+
+	/* Make a new Autoformax Packer */
+	p := &AutofmxPacket{}
+
+	/* Check if it should go with size pre field */
 	if hasLengthField {
 		p.buff = buff
 	} else {
+
 		p.buff = make([]byte, 4+len(buff))
 		binary.BigEndian.PutUint32(p.buff[0:4], uint32(len(buff)))
 		copy(p.buff[4:], buff)
@@ -49,7 +66,7 @@ func NewEchoPacket(buff []byte, hasLengthField bool) *EchoPacket {
 	return p
 }
 
-type RecieveImageProtocol struct {
+type AutofmxProtocol struct {
 }
 
 /**
@@ -63,38 +80,39 @@ type RecieveImageProtocol struct {
  *
  * @return     This function returns the size of the packet and the packet itself and a error.
  */
-func (epl *RecieveImageProtocol) ReadPacket(conn *net.TCPConn) (int, afmxsrv.Packet, error) {
+func (epl *AutofmxProtocol) ReadPacket(conn *net.TCPConn) (afmxsrv.Packet, error) {
 
-	var (
-		lengthTotalBytes []byte = make([]byte, 4)
-	)
+	var sz uint32
+	var szByteField []byte = make([]byte, 4)
 
-	// read lengthTotal, io.ReadFull deals with EOF
-	if nRead, err := io.ReadFull(conn, nReadBytes); err != nil {
+	// Full 4 byte field.
+	fmt.Println("ReadingPacket.")
+	if nRead, err := io.ReadFull(conn, szByteField); err != nil {
 		return nil, err
 	} else {
-		fmt.Println("[", nRead, "]:", lengthTotalBytes)
+		fmt.Println("[", nRead, "]:", szByteField)
 	}
 
-	// Twist the byte-lenght 4 bytes.
-	if lengthTotal = binary.BigEndian.Uint32(lengthTotalBytes); lengthTotal > (1 << 20) {
-		fmt.Println("Packet Size blow....")
-		return nil, errors.New("the size of packet is larger than the limit")
+	// Get from bytefield the sz of the rest of the packet. sz is not to be higher than 16 MEGS.
+	if sz = binary.BigEndian.Uint32(szByteField); sz > (1 << 24) {
+		fmt.Println("Packet oversized.")
+		return nil, errors.New("Packet oversized.")
 	}
+	fmt.Println("Size is:", sz)
 
-	//Use a Buffer to get the rest......
-	buff := make([]byte, 4+lengthTotal)
-	copy(buff[0:4], lengthTotalBytes)
+	//Create a buffer that fits the size of the rest of the packet.
+	buff := make([]byte, sz)
 
-	// read body ( buff = lengthTotalBytes + body )
-	if nRead, err := io.ReadFull(conn, buff[4:]); err != nil {
+	// Read the rest of the packet.
+	if nRead, err := io.ReadFull(conn, buff); err != nil {
 		fmt.Println("err:", err, nRead)
-		return 0, nil, err
+		return nil, err
 	} else {
-		fmt.Println("No error, sized bytes:", nRead)
+		fmt.Println("[", nRead, "]:", string(buff))
+		fmt.Println("[", nRead, "]:", buff)
 	}
 
-	return NewEchoPacket(buff, true), nil
+	return NewAutofmxPacket(buff, true), nil
 }
 
 type Callback struct{}
@@ -103,18 +121,20 @@ func (cb *Callback) OnConnect(c *afmxsrv.Conn) bool {
 	addr := c.GetRawConn().RemoteAddr()
 	c.PutExtraData(addr)
 
-	fmt.Println()
-
 	fmt.Println("OnConnect:", addr)
 	return true
 }
 func (cb *Callback) OnMessage(c *afmxsrv.Conn, p afmxsrv.Packet) bool {
-	fmt.Println("hello")
-	echoPacket := p.(*EchoPacket)
-	message := "OnMessage: received packet length is[%v]\t" +
-		"received packet Body is [%v]\n"
-	fmt.Printf(message, echoPacket.GetLength())
-	//c.AsyncWritePacket(NewEchoPacket(echoPacket.Serialize(), true), time.Second)
+
+	fmt.Println("OnMessage")
+
+	//(*AutofmxPacket) ----> Notation to cast the type.
+	autofmxPacket := p.(*AutofmxPacket)
+
+	//Get data.
+	_, jsonBuffer, _ := autofmxPacket.GetSizeDataBlock()
+	autoformaxImageInfo, _ := afmxdec.ParseAutoFMXImageMetaInfo(jsonBuffer)
+	fmt.Println(autoformaxImageInfo.OriginatorHardwareAddress, autoformaxImageInfo.OriginatorHardwareAddressString, autoformaxImageInfo.OriginatorTimeStampUTC, autoformaxImageInfo.OriginatorTimeStampUTCString)
 	return true
 
 }
@@ -137,7 +157,7 @@ func main() {
 		PacketSendChanLimit:    2000,
 		PacketReceiveChanLimit: 2000,
 	}
-	srv := afmxsrv.NewServer(config, &Callback{}, &EchoProtocol{})
+	srv := afmxsrv.NewServer(config, &Callback{}, &AutofmxProtocol{})
 
 	// starts service
 	go srv.Start(listener, time.Second)
