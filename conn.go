@@ -2,6 +2,7 @@ package afmxsrv
 
 import (
 	"errors"
+	_ "fmt"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -124,7 +125,6 @@ func (c *Conn) Do() {
 	if !c.srv.callback.OnConnect(c) {
 		return
 	}
-
 	asyncDo(c.handleLoop, c.srv.waitGroup)
 	asyncDo(c.readLoop, c.srv.waitGroup)
 	asyncDo(c.writeLoop, c.srv.waitGroup)
@@ -196,12 +196,13 @@ func (c *Conn) handleLoop() {
 			return
 
 		case p := <-c.packetReceiveChan:
-			if c.IsClosed() {
-				return
-			}
 			if !c.srv.callback.OnMessage(c, p) {
 				return
 			}
+			if c.IsClosed() {
+				return
+			}
+
 		}
 	}
 }
