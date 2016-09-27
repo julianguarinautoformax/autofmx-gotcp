@@ -9,6 +9,7 @@ import (
 	"github.com/autofmx/afmxdec"
 	"github.com/autofmx/afmxsrv"
 	"io"
+	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -108,8 +109,7 @@ func (epl *AutofmxProtocol) ReadPacket(conn *net.TCPConn) (afmxsrv.Packet, error
 		fmt.Println("err:", err, nRead)
 		return nil, err
 	} else {
-		fmt.Println("[", nRead, "]:", string(buff))
-		fmt.Println("[", nRead, "]:", buff)
+		fmt.Println("[", nRead, "]")
 	}
 
 	return NewAutofmxPacket(buff, true), nil
@@ -132,9 +132,20 @@ func (cb *Callback) OnMessage(c *afmxsrv.Conn, p afmxsrv.Packet) bool {
 	autofmxPacket := p.(*AutofmxPacket)
 
 	//Get data.
-	_, jsonBuffer, _ := autofmxPacket.GetSizeDataBlock()
+	_, jsonBuffer, pngBuffer := autofmxPacket.GetSizeDataBlock()
 	autoformaxImageInfo, _ := afmxdec.ParseAutoFMXImageMetaInfo(jsonBuffer)
 	fmt.Println(autoformaxImageInfo.OriginatorHardwareAddress, autoformaxImageInfo.OriginatorHardwareAddressString, autoformaxImageInfo.OriginatorTimeStampUTC, autoformaxImageInfo.OriginatorTimeStampUTCString)
+
+	/* Save PNG */
+	filename := os.Getenv("IMAGES_REPOSITORY") + "/" + autoformaxImageInfo.OriginatorHardwareAddressString + "_" + autoformaxImageInfo.OriginatorTimeStampUTCString + ".png"
+	err := ioutil.WriteFile(filename, pngBuffer, 0644)
+	if err != nil {
+		fmt.Println("Problem writing file.")
+		/* Notify administrator */
+	} else {
+		fmt.Println("Save a ", len(pngBuffer), " bytes PNG")
+	}
+	fmt.Println(filename)
 	return true
 
 }
