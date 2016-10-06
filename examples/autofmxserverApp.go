@@ -96,7 +96,7 @@ func (epl *AutofmxProtocol) ReadPacket(conn *net.TCPConn) (afmxsrv.Packet, error
 
 	// Get from bytefield the sz of the rest of the packet. sz is not to be higher than 16 MEGS.
 	if sz = binary.BigEndian.Uint32(szByteField); sz > (1 << 24) {
-		fmt.Println("Packet oversized.")
+		fmt.Println("Packet oversized:",sz,1<<24)
 		return nil, errors.New("Packet oversized.")
 	}
 	fmt.Println("Size is:", sz)
@@ -132,6 +132,7 @@ func (cb *Callback) OnMessage(c *afmxsrv.Conn, p afmxsrv.Packet) bool {
 	autofmxPacket := p.(*AutofmxPacket)
 
 	//Get data.
+	fmt.Println("Parsing json:")
 	_, jsonBuffer, pngBuffer := autofmxPacket.GetSizeDataBlock()
 	autoformaxImageInfo, _ := afmxdec.ParseAutoFMXImageMetaInfo(jsonBuffer)
 	fmt.Println(autoformaxImageInfo.OriginatorHardwareAddress, autoformaxImageInfo.OriginatorHardwareAddressString, autoformaxImageInfo.OriginatorTimeStampUTC, autoformaxImageInfo.OriginatorTimeStampUTCString)
